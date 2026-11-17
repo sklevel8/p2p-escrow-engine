@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b0906" />
+  <meta name="description" content="A neutral P2P escrow engine for South African marketplaces: a hardened state machine, PayFast ITN verification and an append-only audit trail." />
+  <title>Escrow Engine — state machine & gateway policy</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="app.css" />
+  <link rel="stylesheet" href="theme.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="shell topbar__inner">
+      <a class="brand" href="./" aria-label="Escrow Engine home">
+        <span class="brand__mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M12 3.5 20 7v5.2c0 4.4-3.2 7.4-8 8.3-4.8-.9-8-3.9-8-8.3V7l8-3.5Z" stroke-linejoin="round"/>
+            <path d="m8.5 12 2.4 2.4 4.6-4.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+        <span class="brand__name">Escrow<span>Engine</span></span>
+        <span class="brand__tag">p2p · za</span>
+      </a>
+      <nav class="nav" aria-label="Primary">
+        <a href="#simulator" class="is-active">Simulator</a>
+        <a href="#gateway">Gateway</a>
+        <a href="#rules">Rules</a>
+        <span class="nav__divider" aria-hidden="true"></span>
+        <a href="https://github.com/sklevel8/p2p-escrow-engine" target="_blank" rel="noopener">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="shell page">
+    <section class="hero" id="simulator">
+      <div>
+        <div class="eyebrow"><span class="eyebrow__dot"></span> Escrow state machine</div>
+        <h1>Money moves only when <span>the rules allow it.</span></h1>
+        <p class="lede">
+          Every transition is gated by an explicit table: a PayFast callback cannot jump from
+          <span class="mono">INITIATED</span> straight to <span class="mono">RELEASED</span>, and terminal states
+          accept nothing further. Drive the machine below to see the guardrails in action.
+        </p>
+        <div class="hero-pills">
+          <span class="badge">7 states</span>
+          <span class="badge">append-only audit</span>
+          <span class="badge">integer cents</span>
+          <span class="badge">signed webhooks</span>
+        </div>
+      </div>
+
+      <div class="card card--accent">
+        <div class="card__head">
+          <div>
+            <h2 class="card__title">New escrow</h2>
+            <p class="card__hint">Values feed the simulator only.</p>
+          </div>
+          <span class="badge badge--accent mono" id="escrowId">ESC-1042</span>
+        </div>
+        <form id="escrowForm" class="stack">
+          <div class="field">
+            <label class="field__label" for="amountInput">Amount (ZAR)</label>
+            <input id="amountInput" class="input mono" type="number" min="1" step="0.01" value="1499.00" required />
+          </div>
+          <div class="grid grid--2" style="gap:12px">
+            <div class="field">
+              <label class="field__label" for="buyerInput">Buyer</label>
+              <input id="buyerInput" class="input" type="text" value="Thandi M." maxlength="28" />
+            </div>
+            <div class="field">
+              <label class="field__label" for="sellerInput">Seller</label>
+              <input id="sellerInput" class="input" type="text" value="Kagiso T." maxlength="28" />
+            </div>
+          </div>
+          <button class="btn btn--primary btn--block" type="submit">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke-linecap="round"/></svg>
+            Open escrow
+          </button>
+        </form>
+        <p class="tiny dim" style="margin-top:12px">Resetting replaces the active escrow and clears the audit trail.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section__head">
+        <div>
+          <h2 class="h2">Lifecycle</h2>
+          <p class="section__desc">Current state is highlighted. Only valid next states are offered as actions.</p>
+        </div>
+        <div class="row">
+          <span class="badge" id="terminalBadge">non-terminal</span>
+          <span class="badge badge--accent mono" id="heldAmount">R 1 499.00 held</span>
+        </div>
+      </div>
+
+      <div class="grid grid--sidebar">
+        <div class="card">
+          <div class="machine" id="machine" role="list" aria-label="Escrow states"></div>
+
+          <div class="transition-bar">
+            <div>
+              <span class="stat__label">Allowed next states</span>
+              <div class="row" id="nextStates" style="margin-top:8px"></div>
+            </div>
+            <div class="attempt">
+              <label class="field__label" for="invalidSelect">Demonstrate a blocked transition</label>
+              <div class="row">
+                <select id="invalidSelect" class="select grow"></select>
+                <button class="btn btn--sm btn--ghost" type="button" id="attemptBtn">Attempt</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="card trail-card">
+          <div class="card__head">
+            <div>
+              <h3 class="card__title">Audit trail</h3>
+              <p class="card__hint">Append-only · newest first</p>
+            </div>
+            <span class="badge mono" id="trailCount">0</span>
+          </div>
+          <ol class="trail" id="trail"></ol>
+          <div id="trailEmpty" class="empty"><strong>No events yet</strong><span>Open an escrow to start the trail.</span></div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section" id="gateway">
+      <div class="section__head">
+        <div>
+          <h2 class="h2">Gateway notification policy</h2>
+          <p class="section__desc">A notification funds escrow only when the status is successful <em>and</em> the settled amount matches exactly.</p>
+        </div>
+        <span class="badge">PayFast ITN</span>
+      </div>
+
+      <div class="grid grid--2">
+        <div class="card">
+          <div class="card__head">
+            <div>
+              <h3 class="card__title">Decision simulator</h3>
+              <p class="card__hint">Mirrors <code class="mono">decideGatewayAction()</code></p>
+            </div>
+          </div>
+          <div class="grid grid--2" style="gap:12px">
+            <div class="field">
+              <label class="field__label" for="gwStatus">Gateway status</label>
+              <select id="gwStatus" class="select">
+                <option>COMPLETE</option>
+                <option>PAID</option>
+                <option>SUCCESS</option>
+                <option>PENDING</option>
+                <option>FAILED</option>
+                <option>CANCELLED</option>
+              </select>
+            </div>
+            <div class="field">
+              <label class="field__label" for="gwAmount">Settled amount (cents)</label>
+              <input id="gwAmount" class="input mono" type="number" min="0" step="1" value="149900" />
+            </div>
+          </div>
+          <div class="field" style="margin-top:12px">
+            <label class="field__label" for="gwExpected">Escrow expected amount (cents)</label>
+            <input id="gwExpected" class="input mono" type="number" min="0" step="1" value="149900" />
+          </div>
+          <div id="decision" class="decision" style="margin-top:16px">
+            <span class="badge badge--ok"><span class="dot"></span> fund</span>
+            <p>Status is successful and the settled amount matches the escrow exactly.</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 class="card__title">Why exact matching</h3>
+          <p class="muted small" style="margin-top:6px">
+            Silent partial funding is the failure mode this policy exists to prevent. A gateway
+            that settles R 1 000 against a R 1 499 escrow must never mark the escrow funded — the
+            seller would ship goods against money that was never collected.
+          </p>
+          <div class="policy-list">
+            <div><span class="badge badge--ok">fund</span><span>Successful status + exact amount</span></div>
+            <div><span class="badge">ignore</span><span>Non-successful status, acknowledged with no state change</span></div>
+            <div><span class="badge badge--bad">reject</span><span>Unparseable, non-positive or mismatched amount — alert raised</span></div>
+          </div>
+          <pre class="code-block mono"><span class="dim">// integer cents, never floats</span>
+parseAmountToCents("1499.00") <span class="dim">→</span> 149900</pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="rules">
+      <div class="section__head">
+        <div>
+          <h2 class="h2">Transition table</h2>
+          <p class="section__desc">The single source of truth for every money-moving operation.</p>
+        </div>
+      </div>
+      <div class="card card--flush">
+        <div class="table-wrap">
+          <table class="table">
+            <thead><tr><th>From</th><th>Allowed next states</th><th>Terminal</th><th>Typical trigger</th></tr></thead>
+            <tbody id="rulesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="footer__inner">
+        <span>Built by Sipho Makubalo · neutral escrow, no custody of funds.</span>
+        <div class="row row--tight">
+          <a href="https://github.com/sklevel8/p2p-escrow-engine" target="_blank" rel="noopener">Source</a>
+          <span class="dim">·</span>
+          <a href="https://sklevel8-portfolio.netlify.app" target="_blank" rel="noopener">All projects</a>
+        </div>
+      </div>
+    </footer>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
